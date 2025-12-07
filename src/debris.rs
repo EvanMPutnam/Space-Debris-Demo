@@ -1,5 +1,3 @@
-// src/debris.rs
-
 use bevy::prelude::*;
 use chrono::{Datelike, Timelike, Utc};
 

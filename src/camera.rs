@@ -1,4 +1,3 @@
-// src/camera.rs
 use std::{f32::consts::FRAC_PI_2, ops::Range};
 
 use bevy::{
@@ -91,7 +90,7 @@ pub fn setup_camera(mut commands: Commands) {
 
 /// Left-mouse drag to orbit (LeoLabs-style trackball)
 pub fn orbit_camera(
-    mut query: Single<(&mut Transform, &mut OrbitCamera), With<Camera>>,
+    query: Single<(&mut Transform, &mut OrbitCamera), With<Camera>>,
     settings: Res<CameraSettings>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     mouse_motion: Res<AccumulatedMouseMotion>,
@@ -123,7 +122,7 @@ pub fn orbit_camera(
 
 /// Scroll wheel zoom in/out
 pub fn zoom_camera(
-    mut query: Single<(&mut Transform, &mut OrbitCamera), With<Camera>>,
+    query: Single<(&mut Transform, &mut OrbitCamera), With<Camera>>,
     settings: Res<CameraSettings>,
     scroll: Res<AccumulatedMouseScroll>,
 ) {
