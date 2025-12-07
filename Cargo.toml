@@ -1,0 +1,9 @@
+[package]
+name = "SpaceJunkVisualization"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+SGP4-Rust = { git = "https://github.com/EvanMPutnam/SGP4-Rust", branch = "main", version = "0.1.0" }
+bevy = { version = "0.17.2", features = ["jpeg"] }
+chrono = { version = "0.4", features = ["clock"] }
