@@ -114,7 +114,13 @@ pub fn update_debris_positions(
         if let Some(debris_sat) = debris_field.sats.get_mut(debris.sat_index) {
             let satrec = &mut debris_sat.satrec;
 
-            let (_err, r_km, _v_km_s) = satrec.sgp4(jd, fr);
+            let (_err, r_km, _v_km_s) = match satrec.sgp4(jd, fr) {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("Error parsing TLE: {}", e);
+                    continue;
+                }
+            };
 
             let x = r_km[0] as f32;
             let y = r_km[2] as f32;
