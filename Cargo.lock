@@ -4080,6 +4080,7 @@ dependencies = [
 [[package]]
 name = "sgp4-rust"
 version = "0.2.0"
+source = "git+https://github.com/EvanMPutnam/SGP4-Rust?branch=main#397bceea39dca9cedf0ac9768d4492030593a8af"
 dependencies = [
  "chrono",
 ]

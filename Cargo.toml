@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2024"
 
 [dependencies]
-sgp4-rust = { path = "../SGP4-Rust" }
+sgp4-rust = { git = "https://github.com/EvanMPutnam/SGP4-Rust", branch = "main" }
 bevy = { version = "0.17.2", features = ["jpeg"] }
 chrono = { version = "0.4", features = ["clock"] }
 

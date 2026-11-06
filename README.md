@@ -1,7 +1,7 @@
 # Orbital Debris
 
 Every object in CelesTrak's public catalog (28,179 at the last fetch) propagated
-live with [sgp4-rust](../SGP4-Rust) and drawn around a sunlit Earth with Bevy.
+live with [sgp4-rust](https://github.com/EvanMPutnam/SGP4-Rust) and drawn around a sunlit Earth with Bevy.
 
 ![Overview](assets/example.png)
 
