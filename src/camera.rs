@@ -1,143 +1,139 @@
-use std::{f32::consts::FRAC_PI_2, ops::Range};
+//! An orbit camera around the Earth with smoothed motion and a slow drift
+//! when left alone.
+
+use std::f32::consts::FRAC_PI_2;
 
 use bevy::{
-    input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll},
+    core_pipeline::tonemapping::Tonemapping,
+    input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit},
+    post_process::bloom::Bloom,
     prelude::*,
 };
 
-/// Global settings for the orbit camera (speed + limits)
-#[derive(Debug, Resource)]
-pub struct CameraSettings {
-    /// Min / max distance from target (Earth center)
-    pub radius_range: Range<f32>,
-    /// Allowed pitch range so we never flip over the poles
-    pub pitch_range: Range<f32>,
-    /// How fast mouse movement rotates the camera
-    pub rotate_speed: f32,
-    /// How fast scroll zooms in/out
-    pub zoom_speed: f32,
-}
+use crate::astro::sun_direction;
+use crate::clock::SimClock;
 
-impl Default for CameraSettings {
-    fn default() -> Self {
-        let pitch_limit = FRAC_PI_2 - 0.01; // just shy of ±90°
-        Self {
-            radius_range: 1.5..50.0,
-            pitch_range: -pitch_limit..pitch_limit,
-            rotate_speed: 0.005,
-            zoom_speed: 0.15,
-        }
-    }
-}
+const MIN_RADIUS: f32 = 1.3;
+const MAX_RADIUS: f32 = 60.0;
+const MAX_PITCH: f32 = FRAC_PI_2 - 0.02;
+const ROTATE_SPEED: f32 = 0.0045;
+const ZOOM_SPEED: f32 = 0.12;
+/// How quickly the view catches up with its target, per second.
+const SMOOTHING: f32 = 9.0;
+/// Seconds without input before the camera starts to drift.
+const IDLE_SECONDS: f32 = 6.0;
+const DRIFT_SPEED: f32 = 0.025;
 
-/// State for an orbit camera:
-/// yaw   -> rotation around Y (longitude)
-/// pitch -> tilt north/south (latitude)
-/// radius -> distance from target
+/// Where the camera is heading (`target_*`) and where it is now.
 #[derive(Component)]
 pub struct OrbitCamera {
     pub yaw: f32,
     pub pitch: f32,
     pub radius: f32,
-    pub target: Vec3,
-}
-
-impl Default for OrbitCamera {
-    fn default() -> Self {
-        Self {
-            // Start on the equator, looking from +X toward the origin
-            yaw: 0.0,
-            pitch: 0.0,
-            radius: 4.0,
-            target: Vec3::ZERO,
-        }
-    }
+    target_yaw: f32,
+    target_pitch: f32,
+    target_radius: f32,
+    idle: f32,
+    /// Pixels the pointer moved while the button was held, to tell a click from a drag.
+    pub drag_distance: f32,
 }
 
 impl OrbitCamera {
-    /// Convert yaw/pitch/radius into a Transform
-    fn update_transform(&self, transform: &mut Transform) {
+    pub fn new(yaw: f32, pitch: f32, radius: f32) -> Self {
+        Self {
+            yaw,
+            pitch,
+            radius,
+            target_yaw: yaw,
+            target_pitch: pitch,
+            target_radius: radius,
+            idle: 0.0,
+            drag_distance: 0.0,
+        }
+    }
+
+    fn transform(&self) -> Transform {
         let (sin_yaw, cos_yaw) = self.yaw.sin_cos();
         let (sin_pitch, cos_pitch) = self.pitch.sin_cos();
-
-        // Direction from target to camera
-        let dir = Vec3::new(
-            cos_yaw * cos_pitch, // X
-            sin_pitch,           // Y
-            sin_yaw * cos_pitch, // Z
-        );
-
-        transform.translation = self.target + dir * self.radius;
-        transform.look_at(self.target, Vec3::Y);
+        let direction = Vec3::new(cos_yaw * cos_pitch, sin_pitch, sin_yaw * cos_pitch);
+        Transform::from_translation(direction * self.radius).looking_at(Vec3::ZERO, Vec3::Y)
     }
 }
 
-/// Spawn the 3D camera as an orbit camera around the origin (Earth)
-pub fn setup_camera(mut commands: Commands) {
-    let orbit = OrbitCamera::default();
-
-    let mut transform = Transform::default();
-    orbit.update_transform(&mut transform);
-
+/// Starts looking at the Earth from a little past the Sun's direction, so the
+/// view shows the day side, the terminator, and the first city lights.
+pub fn spawn_camera(mut commands: Commands, clock: Res<SimClock>) {
+    let sun = sun_direction(clock.now);
+    let orbit = OrbitCamera::new(sun.z.atan2(sun.x) + 1.15, 0.32, 4.6);
     commands.spawn((
         Name::new("Camera"),
         Camera3d::default(),
-        transform,
-        GlobalTransform::default(),
+        Camera {
+            clear_color: ClearColorConfig::Custom(Color::BLACK),
+            ..default()
+        },
+        Projection::Perspective(PerspectiveProjection {
+            fov: 0.72,
+            near: 0.01,
+            far: 2000.0,
+            ..default()
+        }),
+        Tonemapping::TonyMcMapface,
+        Bloom {
+            intensity: 0.12,
+            ..Bloom::NATURAL
+        },
+        orbit.transform(),
         orbit,
     ));
 }
 
-/// Left-mouse drag to orbit (LeoLabs-style trackball)
-pub fn orbit_camera(
-    query: Single<(&mut Transform, &mut OrbitCamera), With<Camera>>,
-    settings: Res<CameraSettings>,
-    mouse_buttons: Res<ButtonInput<MouseButton>>,
-    mouse_motion: Res<AccumulatedMouseMotion>,
-) {
-    // Only rotate while holding left mouse button
-    if !mouse_buttons.pressed(MouseButton::Left) {
-        return;
-    }
-
-    let (mut transform, mut orbit) = query.into_inner();
-
-    let delta = mouse_motion.delta;
-
-    // Screen X grows to the right; dragging right should spin east,
-    // so we increase yaw with +delta.x.
-    orbit.yaw += delta.x * settings.rotate_speed;
-
-    // Screen Y grows downward; dragging up gives negative delta.y.
-    // We want "drag up" to look north (increase pitch), so subtract.
-    orbit.pitch -= delta.y * settings.rotate_speed;
-
-    // Clamp pitch so we don't flip over the poles
-    orbit.pitch = orbit
-        .pitch
-        .clamp(settings.pitch_range.start, settings.pitch_range.end);
-
-    orbit.update_transform(&mut transform);
-}
-
-/// Scroll wheel zoom in/out
-pub fn zoom_camera(
-    query: Single<(&mut Transform, &mut OrbitCamera), With<Camera>>,
-    settings: Res<CameraSettings>,
+pub fn control_camera(
+    time: Res<Time>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    motion: Res<AccumulatedMouseMotion>,
     scroll: Res<AccumulatedMouseScroll>,
+    camera: Single<(&mut Transform, &mut OrbitCamera)>,
 ) {
-    let (mut transform, mut orbit) = query.into_inner();
+    let (mut transform, mut orbit) = camera.into_inner();
+    let dt = time.delta_secs();
+    let mut active = false;
 
-    let scroll_y = scroll.delta.y;
-    if scroll_y.abs() == 0.0 {
-        return;
+    if buttons.just_pressed(MouseButton::Left) {
+        orbit.drag_distance = 0.0;
+    }
+    if buttons.pressed(MouseButton::Left) && motion.delta != Vec2::ZERO {
+        orbit.drag_distance += motion.delta.length();
+        // Rotate less when zoomed in, so the surface tracks the pointer.
+        let speed = ROTATE_SPEED * (orbit.target_radius / 4.0).clamp(0.25, 1.5);
+        orbit.target_yaw += motion.delta.x * speed;
+        orbit.target_pitch =
+            (orbit.target_pitch + motion.delta.y * speed).clamp(-MAX_PITCH, MAX_PITCH);
+        active = true;
     }
 
-    // Smooth zoom: scale radius based on scroll.
-    // Positive scroll_y (wheel up) should zoom in => shrink radius.
-    let zoom_factor = (1.0 - scroll_y * settings.zoom_speed).max(0.1);
-    orbit.radius =
-        (orbit.radius * zoom_factor).clamp(settings.radius_range.start, settings.radius_range.end);
+    let lines = match scroll.unit {
+        MouseScrollUnit::Line => scroll.delta.y,
+        MouseScrollUnit::Pixel => scroll.delta.y / 40.0,
+    };
+    if lines != 0.0 {
+        orbit.target_radius = (orbit.target_radius * (1.0 - lines * ZOOM_SPEED).max(0.2))
+            .clamp(MIN_RADIUS, MAX_RADIUS);
+        active = true;
+    }
 
-    orbit.update_transform(&mut transform);
+    orbit.idle = if active { 0.0 } else { orbit.idle + dt };
+    if orbit.idle > IDLE_SECONDS {
+        let ramp = ((orbit.idle - IDLE_SECONDS) / 3.0).min(1.0);
+        orbit.target_yaw += DRIFT_SPEED * ramp * dt;
+    }
+
+    let blend = 1.0 - (-SMOOTHING * dt).exp();
+    orbit.yaw += (orbit.target_yaw - orbit.yaw) * blend;
+    orbit.pitch += (orbit.target_pitch - orbit.pitch) * blend;
+    // Zoom in log space so it feels even at every distance.
+    orbit.radius =
+        (orbit.radius.ln() + (orbit.target_radius.ln() - orbit.radius.ln()) * blend).exp();
+
+    *transform = orbit.transform();
 }
